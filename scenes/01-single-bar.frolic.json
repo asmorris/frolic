@@ -1,0 +1,35 @@
+{
+  "format": "frolic-scene",
+  "version": 1,
+  "name": "Single bar magnet",
+  "description": "The classic: field lines leave the north pole (red) and loop around into the south pole (blue).",
+  "magnets": [
+    {
+      "name": "Bar 1",
+      "shape": {
+        "type": "block",
+        "size": [
+          4.0,
+          1.0,
+          1.0
+        ]
+      },
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation": {
+        "yaw_deg": 0.0,
+        "pitch_deg": 0.0,
+        "roll_deg": 0.0
+      },
+      "remanence_tesla": 1.3,
+      "magnetization": [
+        1.0,
+        0.0,
+        0.0
+      ]
+    }
+  ]
+}

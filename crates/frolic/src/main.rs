@@ -6,7 +6,9 @@ mod field;
 mod interaction;
 mod magnets;
 mod meshgen;
+mod persistence;
 mod presets;
+mod scene_file;
 mod ui;
 
 use bevy::prelude::*;
@@ -31,6 +33,7 @@ fn main() {
             interaction::InteractionPlugin,
             ui::UiPlugin,
             presets::PresetPlugin,
+            persistence::PersistencePlugin,
             devtools::DevToolsPlugin,
         ))
         .run();

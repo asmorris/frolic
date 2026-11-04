@@ -1,0 +1,62 @@
+{
+  "format": "frolic-scene",
+  "version": 1,
+  "name": "Two bars, attracting",
+  "description": "North faces south across the gap: the lines bridge straight across, pulling the magnets together.",
+  "magnets": [
+    {
+      "name": "Bar 1",
+      "shape": {
+        "type": "block",
+        "size": [
+          4.0,
+          1.0,
+          1.0
+        ]
+      },
+      "position": [
+        -3.0,
+        0.0,
+        0.0
+      ],
+      "rotation": {
+        "yaw_deg": 0.0,
+        "pitch_deg": 0.0,
+        "roll_deg": 0.0
+      },
+      "remanence_tesla": 1.3,
+      "magnetization": [
+        1.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "Bar 2",
+      "shape": {
+        "type": "block",
+        "size": [
+          4.0,
+          1.0,
+          1.0
+        ]
+      },
+      "position": [
+        3.0,
+        0.0,
+        0.0
+      ],
+      "rotation": {
+        "yaw_deg": 0.0,
+        "pitch_deg": 0.0,
+        "roll_deg": 0.0
+      },
+      "remanence_tesla": 1.3,
+      "magnetization": [
+        1.0,
+        0.0,
+        0.0
+      ]
+    }
+  ]
+}

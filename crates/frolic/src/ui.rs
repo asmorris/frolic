@@ -1,15 +1,19 @@
-//! The side panel: scene presets, adding / editing magnets, field-line settings.
+//! The side panel: scene files and sharing, adding / editing magnets, field-line settings.
 
 use crate::camera::OrbitCamera;
 use crate::field::{field_color, FieldLines, TraceSettings, ViewSettings};
 use crate::interaction::{duplicate, EditSettings};
-use crate::magnets::{MagnetBody, NameCounter, Selection};
-use crate::presets::{LoadPreset, MagnetKind, Preset};
+use crate::magnets::{euler_yxz, MagnetBody, NameCounter, Selection};
+use crate::persistence::{capture, CurrentScene, PendingLoad, SceneCommand, Toasts};
+use crate::presets::{builtin_scenes, MagnetKind, DEFAULT_SCENE};
+use crate::scene_file::SceneFile;
+use bevy::ecs::system::SystemParam;
 use bevy::math::DVec3;
 use bevy::prelude::*;
 use bevy_egui::egui::{self, Color32, RichText};
 use bevy_egui::{EguiContextPass, EguiContexts};
 use frolic_core::Shape;
+use std::time::Duration;
 
 pub struct UiPlugin;
 
@@ -24,11 +28,23 @@ impl Plugin for UiPlugin {
 pub struct UiState {
     pub pointer_over: bool,
     pub keyboard: bool,
-    preset: Option<usize>,
+    example: Option<usize>,
+    paste: String,
+}
+
+/// Scene-file state used by the panel.
+#[derive(SystemParam)]
+struct FileUi<'w> {
+    current: ResMut<'w, CurrentScene>,
+    pending: ResMut<'w, PendingLoad>,
+    toasts: ResMut<'w, Toasts>,
+    commands: EventWriter<'w, SceneCommand>,
+    time: Res<'w, Time>,
 }
 
 const NORTH: Color32 = Color32::from_rgb(220, 60, 50);
 const SOUTH: Color32 = Color32::from_rgb(60, 110, 225);
+const ERROR: Color32 = Color32::from_rgb(240, 110, 100);
 
 #[allow(clippy::too_many_arguments)]
 fn side_panel(
@@ -41,11 +57,12 @@ fn side_panel(
     mut view: ResMut<ViewSettings>,
     mut edit: ResMut<EditSettings>,
     lines: Res<FieldLines>,
-    mut presets: EventWriter<LoadPreset>,
+    mut file: FileUi,
     mut magnets: Query<(Entity, &mut MagnetBody, &mut Transform)>,
     mut cameras: Query<&mut OrbitCamera>,
 ) {
     let ctx = contexts.ctx_mut().clone();
+    let now = file.time.elapsed();
 
     egui::SidePanel::left("frolic_panel").resizable(true).default_width(330.0).show(&ctx, |ui| {
         ui.add_space(6.0);
@@ -58,18 +75,61 @@ fn side_panel(
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             // ---------------------------------------------------------------- Scene
             egui::CollapsingHeader::new("Scene").default_open(true).show(ui, |ui| {
+                egui::Grid::new("scene_meta").num_columns(2).show(ui, |ui| {
+                    ui.label("Name");
+                    let mut name = file.current.name.clone();
+                    ui.add(egui::TextEdit::singleline(&mut name).hint_text("Untitled").desired_width(f32::INFINITY));
+                    if name != file.current.name {
+                        file.current.name = name;
+                    }
+                    ui.end_row();
+                    ui.label("Notes");
+                    let mut desc = file.current.description.clone();
+                    ui.add(
+                        egui::TextEdit::multiline(&mut desc)
+                            .hint_text("Optional description")
+                            .desired_rows(2)
+                            .desired_width(f32::INFINITY),
+                    );
+                    if desc != file.current.description {
+                        file.current.description = desc;
+                    }
+                    ui.end_row();
+                });
+                let location = match &file.current.path {
+                    Some(p) => p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                    None => "not saved yet".into(),
+                };
+                let status = if file.current.is_dirty() { format!("{location} · unsaved changes") } else { location };
+                ui.label(RichText::new(status).weak().small());
                 ui.horizontal(|ui| {
-                    let idx = ui_state.preset.get_or_insert(1);
-                    egui::ComboBox::from_id_salt("preset")
+                    if ui.button("New").clicked() {
+                        file.commands.write(SceneCommand::Load { scene: SceneFile::new("Untitled"), path: None, force: false });
+                    }
+                    if ui.button("Open…").on_hover_text("⌘O / Ctrl+O, or drop a file on the window").clicked() {
+                        file.commands.write(SceneCommand::Open);
+                    }
+                    if ui.button("Save").on_hover_text("⌘S / Ctrl+S").clicked() {
+                        file.commands.write(SceneCommand::Save);
+                    }
+                    if ui.button("Save as…").on_hover_text("⇧⌘S / Shift+Ctrl+S").clicked() {
+                        file.commands.write(SceneCommand::SaveAs);
+                    }
+                });
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    let examples = builtin_scenes();
+                    let idx = ui_state.example.get_or_insert(DEFAULT_SCENE);
+                    egui::ComboBox::from_id_salt("examples")
                         .width(210.0)
-                        .selected_text(Preset::ALL[*idx].label())
+                        .selected_text(examples[*idx].name.as_str())
                         .show_ui(ui, |ui| {
-                            for (i, p) in Preset::ALL.iter().enumerate() {
-                                ui.selectable_value(idx, i, p.label());
+                            for (i, s) in examples.iter().enumerate() {
+                                ui.selectable_value(idx, i, s.name.as_str()).on_hover_text(&s.description);
                             }
                         });
-                    if ui.button("Load").clicked() {
-                        presets.write(LoadPreset(Preset::ALL[*idx]));
+                    if ui.button("Open example").clicked() {
+                        file.commands.write(SceneCommand::Load { scene: examples[*idx].clone(), path: None, force: false });
                     }
                 });
                 ui.label("Add a magnet:");
@@ -139,6 +199,42 @@ fn side_panel(
                     });
                 }
             }
+
+            // ---------------------------------------------------------------- Share
+            egui::CollapsingHeader::new("Share").default_open(false).show(ui, |ui| {
+                ui.label(
+                    RichText::new("A share code is the whole scene as one line of text: paste it into a chat, an issue, anywhere.")
+                        .weak(),
+                );
+                if ui.button("Copy share code").clicked() {
+                    let scene = capture(&file.current, magnets.iter().map(|(_, b, t)| (b, t)), cameras.single().ok());
+                    let code = scene.to_share_code();
+                    let len = code.len();
+                    ctx.copy_text(code);
+                    file.toasts.info(now, format!("Share code copied to the clipboard ({len} characters)"));
+                }
+                ui.add_space(4.0);
+                ui.add(
+                    egui::TextEdit::multiline(&mut ui_state.paste)
+                        .hint_text("Paste a share code (FROLIC1:…) or scene JSON")
+                        .desired_rows(2)
+                        .desired_width(f32::INFINITY),
+                );
+                if ui.add_enabled(!ui_state.paste.trim().is_empty(), egui::Button::new("Open pasted scene")).clicked() {
+                    match SceneFile::parse_any(&ui_state.paste) {
+                        Ok(scene) => {
+                            file.commands.write(SceneCommand::Load { scene, path: None, force: false });
+                            ui_state.paste.clear();
+                        }
+                        Err(e) => file.toasts.error(now, format!("Couldn't open that: {e}")),
+                    }
+                }
+                ui.label(
+                    RichText::new("Scene files (.frolic.json) can be shared directly too. To add one to the public gallery, open a pull request adding it to the repo's scenes/ folder.")
+                        .weak()
+                        .small(),
+                );
+            });
 
             // ---------------------------------------------------------------- Field lines
             egui::CollapsingHeader::new("Field lines").default_open(true).show(ui, |ui| {
@@ -219,6 +315,55 @@ fn side_panel(
         });
     });
 
+    // Confirm before replacing unsaved work.
+    if let Some((scene, _)) = &file.pending.0 {
+        let incoming = if scene.name.is_empty() { "Untitled".to_string() } else { scene.name.clone() };
+        let current = if file.current.name.is_empty() { "Untitled".to_string() } else { file.current.name.clone() };
+        let mut decision = None;
+        egui::Window::new("Unsaved changes")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(&ctx, |ui| {
+                ui.label(format!("“{current}” has unsaved changes."));
+                ui.label(format!("Discard them and open “{incoming}”?"));
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if ui.button(RichText::new("Discard and open").color(ERROR)).clicked() {
+                        decision = Some(true);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        decision = Some(false);
+                    }
+                });
+            });
+        match decision {
+            Some(true) => {
+                if let Some((scene, path)) = file.pending.0.take() {
+                    file.commands.write(SceneCommand::Load { scene, path, force: true });
+                }
+            }
+            Some(false) => file.pending.0 = None,
+            None => {}
+        }
+    }
+
+    // Transient notification.
+    if let Some((msg, is_error, at)) = &file.toasts.message {
+        let ttl = if *is_error { Duration::from_secs(8) } else { Duration::from_secs(4) };
+        if now.saturating_sub(*at) < ttl {
+            egui::Area::new(egui::Id::new("toast"))
+                .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -24.0])
+                .interactable(false)
+                .show(&ctx, |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        let text = RichText::new(msg.as_str());
+                        ui.label(if *is_error { text.color(ERROR) } else { text });
+                    });
+                });
+        }
+    }
+
     ui_state.pointer_over = ctx.is_pointer_over_area() || ctx.wants_pointer_input();
     ui_state.keyboard = ctx.wants_keyboard_input();
 }
@@ -282,7 +427,7 @@ fn inspector(ui: &mut egui::Ui, b: &mut MagnetBody, t: &mut Transform, delete: &
         });
         ui.end_row();
 
-        let (yaw, pitch, roll) = t.rotation.to_euler(EulerRot::YXZ);
+        let (yaw, pitch, roll) = euler_yxz(t.rotation);
         let mut deg = [yaw.to_degrees(), pitch.to_degrees(), roll.to_degrees()];
         ui.label("Rotation");
         let changed = ui
@@ -358,7 +503,7 @@ fn inspector(ui: &mut egui::Ui, b: &mut MagnetBody, t: &mut Transform, delete: &
     ui.horizontal(|ui| {
         *focus = ui.button("Focus camera").clicked();
         *dup = ui.button("Duplicate").clicked();
-        *delete = ui.button(RichText::new("Delete").color(Color32::from_rgb(240, 110, 100))).clicked();
+        *delete = ui.button(RichText::new("Delete").color(ERROR)).clicked();
     });
 }
 

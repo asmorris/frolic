@@ -1,21 +1,54 @@
-//! Built-in magnet kinds and example scenes.
+//! Built-in magnet kinds and the example scenes shipped in the repo's `scenes/` folder.
 
-use crate::magnets::{MagnetBody, NameCounter, Selection};
+use crate::magnets::{MagnetBody, NameCounter};
+use crate::persistence::SceneCommand;
+use crate::scene_file::SceneFile;
 use bevy::math::DVec3;
 use bevy::prelude::*;
 use frolic_core::Shape;
 use std::f32::consts::FRAC_PI_2;
+use std::sync::OnceLock;
 
 pub struct PresetPlugin;
 
 impl Plugin for PresetPlugin {
     fn build(&self, app: &mut App) {
-        app.add_event::<LoadPreset>()
-            .add_systems(Startup, |mut ev: EventWriter<LoadPreset>| {
-                ev.write(LoadPreset(Preset::AttractingBars));
-            })
-            .add_systems(Update, load_preset);
+        app.add_systems(Startup, load_default_scene);
     }
+}
+
+/// The example scenes, embedded from `scenes/*.frolic.json` at compile time.
+const BUILTIN_JSON: [&str; 8] = [
+    include_str!("../../../scenes/01-single-bar.frolic.json"),
+    include_str!("../../../scenes/02-attracting-bars.frolic.json"),
+    include_str!("../../../scenes/03-repelling-bars.frolic.json"),
+    include_str!("../../../scenes/04-side-by-side-bars.frolic.json"),
+    include_str!("../../../scenes/05-horseshoe.frolic.json"),
+    include_str!("../../../scenes/06-halbach-array.frolic.json"),
+    include_str!("../../../scenes/07-disc-stacks.frolic.json"),
+    include_str!("../../../scenes/08-mixed-shapes.frolic.json"),
+];
+
+/// Index of the scene shown at startup.
+pub const DEFAULT_SCENE: usize = 1;
+
+pub fn builtin_scenes() -> &'static [SceneFile] {
+    static SCENES: OnceLock<Vec<SceneFile>> = OnceLock::new();
+    SCENES.get_or_init(|| {
+        BUILTIN_JSON
+            .iter()
+            .map(|json| SceneFile::from_json(json).expect("built-in scene files are valid"))
+            .collect()
+    })
+}
+
+fn load_default_scene(mut commands: EventWriter<SceneCommand>) {
+    // A scene file given on the command line takes precedence.
+    if std::env::args().skip(1).any(|a| !a.starts_with('-')) {
+        return;
+    }
+    let scene = builtin_scenes()[DEFAULT_SCENE].clone();
+    commands.write(SceneCommand::Load { scene, path: None, force: true });
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,118 +93,11 @@ impl MagnetKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Preset {
-    SingleBar,
-    AttractingBars,
-    RepellingBars,
-    ParallelBars,
-    Horseshoe,
-    Halbach,
-    DiscStack,
-    Mixed,
-    Empty,
-}
 
-impl Preset {
-    pub const ALL: [Preset; 9] = [
-        Self::SingleBar,
-        Self::AttractingBars,
-        Self::RepellingBars,
-        Self::ParallelBars,
-        Self::Horseshoe,
-        Self::Halbach,
-        Self::DiscStack,
-        Self::Mixed,
-        Self::Empty,
-    ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::SingleBar => "Single bar magnet",
-            Self::AttractingBars => "Two bars, attracting (N→S)",
-            Self::RepellingBars => "Two bars, repelling (N↔N)",
-            Self::ParallelBars => "Side-by-side bars (antiparallel)",
-            Self::Horseshoe => "Horseshoe (three blocks)",
-            Self::Halbach => "Halbach array (5 cubes)",
-            Self::DiscStack => "Disc magnets with a gap",
-            Self::Mixed => "Mixed shapes",
-            Self::Empty => "Empty scene",
-        }
-    }
-}
-
-#[derive(Event, Clone, Copy)]
-pub struct LoadPreset(pub Preset);
-
-fn load_preset(
-    mut commands: Commands,
-    mut events: EventReader<LoadPreset>,
-    existing: Query<Entity, With<MagnetBody>>,
-    mut names: ResMut<NameCounter>,
-    mut selection: ResMut<Selection>,
-) {
-    let Some(LoadPreset(preset)) = events.read().last().copied() else { return };
-    for e in &existing {
-        commands.entity(e).despawn();
-    }
-    *names = NameCounter::default();
-    selection.0 = None;
-
-    let mut spawn = |name: &str, shape: Shape, dir: DVec3, pos: Vec3, rot: Quat| {
-        let body = MagnetBody::new(names.next(name), shape, dir);
-        commands.spawn((body, Transform::from_translation(pos).with_rotation(rot)));
-    };
-    let bar = Shape::Cuboid { size: DVec3::new(4.0, 1.0, 1.0) };
-    let id = Quat::IDENTITY;
-    match preset {
-        Preset::SingleBar => spawn("Bar", bar, DVec3::X, Vec3::ZERO, id),
-        Preset::AttractingBars => {
-            spawn("Bar", bar, DVec3::X, Vec3::new(-3.0, 0.0, 0.0), id);
-            spawn("Bar", bar, DVec3::X, Vec3::new(3.0, 0.0, 0.0), id);
-        }
-        Preset::RepellingBars => {
-            spawn("Bar", bar, DVec3::X, Vec3::new(-3.0, 0.0, 0.0), id);
-            spawn("Bar", bar, -DVec3::X, Vec3::new(3.0, 0.0, 0.0), id);
-        }
-        Preset::ParallelBars => {
-            spawn("Bar", bar, DVec3::X, Vec3::new(0.0, 0.0, -1.5), id);
-            spawn("Bar", bar, -DVec3::X, Vec3::new(0.0, 0.0, 1.5), id);
-        }
-        Preset::Horseshoe => {
-            let leg = Shape::Cuboid { size: DVec3::new(1.0, 3.0, 1.0) };
-            let base = Shape::Cuboid { size: DVec3::new(4.0, 1.0, 1.0) };
-            // Magnetization follows the U: down the left leg, across, up the right leg.
-            spawn("Leg", leg, -DVec3::Y, Vec3::new(-1.5, 1.0, 0.0), id);
-            spawn("Base", base, DVec3::X, Vec3::new(0.0, -1.0, 0.0), id);
-            spawn("Leg", leg, DVec3::Y, Vec3::new(1.5, 1.0, 0.0), id);
-        }
-        Preset::Halbach => {
-            let cube = Shape::Cuboid { size: DVec3::splat(1.2) };
-            // Magnetization rotates by 90° per cube: strong field below, weak above.
-            let dirs = [DVec3::X, DVec3::NEG_Y, DVec3::NEG_X, DVec3::Y, DVec3::X];
-            for (i, d) in dirs.into_iter().enumerate() {
-                spawn("Cube", cube, d, Vec3::new((i as f32 - 2.0) * 1.2, 0.0, 0.0), id);
-            }
-        }
-        Preset::DiscStack => {
-            let disc = Shape::Cylinder { radius: 1.2, height: 0.4 };
-            let up = Quat::from_rotation_x(-FRAC_PI_2);
-            for y in [-1.4, -1.0, 1.0, 1.4] {
-                spawn("Disc", disc, DVec3::Z, Vec3::new(0.0, y, 0.0), up);
-            }
-        }
-        Preset::Mixed => {
-            spawn("Bar", bar, DVec3::X, Vec3::new(-2.5, 0.0, -1.5), id);
-            spawn(
-                "Cylinder",
-                Shape::Cylinder { radius: 0.6, height: 2.5 },
-                DVec3::Z,
-                Vec3::new(2.5, 0.0, -1.0),
-                Quat::from_rotation_x(-FRAC_PI_2),
-            );
-            spawn("Sphere", Shape::Sphere { radius: 0.8 }, DVec3::X, Vec3::new(0.5, 0.0, 2.5), id);
-        }
-        Preset::Empty => {}
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn builtin_scenes_parse() {
+        assert_eq!(super::builtin_scenes().len(), 8);
     }
 }

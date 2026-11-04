@@ -22,9 +22,60 @@ cargo test --workspace   # physics tests
 | F | focus the camera on the selection |
 | ⌘D / Ctrl+D | duplicate |
 | Delete / Backspace | remove |
+| ⌘O / Ctrl+O | open a scene |
+| ⌘S / Ctrl+S, ⇧⌘S | save / save as |
 
-The side panel loads presets, adds magnets, edits size, pose and magnetization
+The side panel opens example scenes, adds magnets, edits size, pose and magnetization
 (strength Br and direction), and tunes the field-line display.
+
+## Saving and sharing scenes
+
+Scenes are saved as human-readable `.frolic.json` files. Open them in any of these ways:
+
+* **Open…** in the panel, or ⌘O
+* drag the file onto the window
+* `cargo run --release -- path/to/scene.frolic.json`
+
+To share a scene:
+
+* **Send the file.** It's small, readable JSON that diffs nicely in git.
+* **Share code.** *Share → Copy share code* puts the whole scene on your clipboard as one
+  line of text (`FROLIC1:…`). The recipient pastes it into *Share → Open pasted scene*.
+  Codes still work after a chat app wraps them across lines.
+* **Add it to the gallery.** The example scenes live in [`scenes/`](scenes/). Open a
+  pull request that adds yours there; see [`scenes/README.md`](scenes/README.md).
+
+Saving records the camera view, so a shared scene opens from the same angle. Frolic
+tracks unsaved changes (shown as • in the title bar) and asks before anything replaces
+them.
+
+### File format
+
+```json
+{
+  "format": "frolic-scene",
+  "version": 1,
+  "name": "Two bars, attracting",
+  "description": "optional",
+  "magnets": [
+    {
+      "name": "Bar 1",
+      "shape": { "type": "block", "size": [4.0, 1.0, 1.0] },
+      "position": [-3.0, 0.0, 0.0],
+      "rotation": { "yaw_deg": 0.0, "pitch_deg": 0.0, "roll_deg": 0.0 },
+      "remanence_tesla": 1.3,
+      "magnetization": [1.0, 0.0, 0.0]
+    }
+  ]
+}
+```
+
+Shapes are `block` (`size`), `cylinder` (`radius`, `height`; axis along local Z) and
+`sphere` (`radius`), all in cm. Rotation is yaw about Y, then pitch about X, then roll
+about Z, in degrees. `magnetization` is the direction the north pole points, in the
+magnet's own frame. `camera` is optional. Unknown fields are ignored, so files from newer
+versions still open where they can, and files with a newer `version` are refused with a
+clear message instead of loading incorrectly.
 
 Units: lengths in cm (one grid cell = 1 cm), fields in tesla.
 
@@ -44,8 +95,11 @@ crates/
     interaction.rs picking, dragging, rotating, shortcuts
     ui.rs          side panel
     meshgen.rs     magnet meshes with north/south pole colouring
-    presets.rs     example scenes
-    devtools.rs    FROLIC_PRESET=<n> and FROLIC_SCREENSHOT=<png> hooks for automated checks
+    scene_file.rs  .frolic.json format, validation, share codes
+    persistence.rs open/save dialogs, drag-and-drop, unsaved-change tracking
+    presets.rs     magnet kinds; embeds the example scenes from scenes/
+    devtools.rs    FROLIC_PRESET / FROLIC_SCREENSHOT / FROLIC_SAVE hooks for automated checks
+scenes/          example scenes, also the community gallery
 ```
 
 ### Physics notes
