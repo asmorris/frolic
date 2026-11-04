@@ -1,0 +1,15 @@
+[package]
+name = "frolic"
+description = "Frolic: an interactive 3D magnetic field simulator."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "frolic"
+path = "src/main.rs"
+
+[dependencies]
+frolic-core.workspace = true
+bevy = "0.16.1"
+bevy_egui = "0.34.1"
