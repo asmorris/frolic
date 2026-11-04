@@ -3,6 +3,8 @@
 An interactive 3D magnetic field simulator. Place permanent magnets, drag and rotate them,
 and watch the field lines update in real time.
 
+I called it frolic because I wanted people to enjoy running around and playing in fields.
+
 ```sh
 cargo run --release      # or `cargo run` (dev builds are optimized enough to be smooth)
 cargo test --workspace   # physics tests
