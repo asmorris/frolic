@@ -9,6 +9,7 @@ mod meshgen;
 mod persistence;
 mod presets;
 mod scene_file;
+mod theme;
 mod ui;
 
 use bevy::prelude::*;
